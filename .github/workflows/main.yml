@@ -25,20 +25,19 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt update
-          sudo apt install -y cpio curl unzip python3-pip jq
+          sudo apt install -y cpio curl unzip python3-pip
           pip3 install gdown
 
       - name: Download Boot Image
         run: |
-          # Используем gdown для обхода ограничений Google Drive
           gdown ${{ github.event.inputs.boot_id }} -O boot.img
           if [ ! -s boot.img ]; then echo "Ошибка: boot.img пустой!"; exit 1; fi
 
       - name: Setup Magiskboot & KSU Kernel
         run: |
-          # Скачиваем magiskboot. Используем API GitHub для получения прямой ссылки на скачивание
-          ASSET_URL=$(curl -s https://api.github.com/repos/magisk-modules/magiskboot-binaries/releases/tags/v27.0 | jq -r '.assets[] | select(.name=="magiskboot.zip") | .browser_download_url')
-          curl -L "$ASSET_URL" -o magiskboot.zip
+          # Прямая ссылка на magiskboot (без jq)
+          ASSET_URL="https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip"
+          curl -L "$ASSET_URL" -o magiskboot.zip || { echo "Ошибка скачивания magiskboot"; exit 1; }
           
           # Распаковка
           unzip -o magiskboot.zip x86_64/magiskboot -d .
@@ -46,7 +45,7 @@ jobs:
           
           # Скачиваем ядро KernelSU
           KSU_URL="https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img"
-          curl -L "$KSU_URL" -o ksu_kernel
+          curl -L "$KSU_URL" -o ksu_kernel || { echo "Ошибка скачивания ядра KSU"; exit 1; }
 
       - name: Patching Process
         run: |
@@ -54,26 +53,28 @@ jobs:
           ./magiskboot unpack boot.img
           if [ ! -f kernel ]; then echo "Ошибка: Не удалось распаковать boot.img!"; exit 1; fi
           
-          # Подмена ядра (как в твоем оригинальном сценарии, но без компиляции)
+          # Замена ядра
           mv -f ksu_kernel kernel
           
-          # Сборка
+          # Сборка (исправлено fi)
           ./magiskboot repack boot.img patched_boot.img
-          if [ ! -f patched_boot.img ]; then echo "Ошибка: patched_boot.img не создан!"; exit 1; fі
+          if [ ! -f patched_boot.img ]; then 
+            echo "Ошибка: patched_boot.img не создан!"
+            exit 1
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Patched_Boot_${{ github.event.inputs.ksu_version }}
+          name: Patched_Boot_A50
           path: patched_boot.img
 
       - name: Release Patched Boot
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: ${{ github.event.inputs.ksu_version }}-${{ github.run_id }}
+          tag_name: ksu-${{ github.event.inputs.ksu_version }}-${{ github.run_id }}
           body: |
-            KernelSU Patched Boot for Samsung A50
+            Готовый патченный boot.img для Samsung A50.
             Версия KernelSU: ${{ github.event.inputs.ksu_version }}
-            Исходный файл ID: ${{ github.event.inputs.boot_id }}
           files: patched_boot.img
