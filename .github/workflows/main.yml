@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       boot_url:
-        description: "Прямая ссылка на твой boot.img (Google Drive)"
+        description: "ID файла Google Drive (только буквы и цифры)"
         required: true
-        default: "https://docs.google.com/uc?export=download&id=1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
+        default: "1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
       ksu_version:
         description: "Версия KernelSU"
         required: true
@@ -26,38 +26,35 @@ jobs:
 
       - name: Download Boot
         run: |
-          # Скрипт для пробития защиты Google Drive на большие файлы
-          FILE_ID="1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
-          CONFIRM=$(curl -sc /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}" | grep -o 'name="confirm" value="[^"]*"' | sed 's/.*value="\([^"]*\)".*/\1/')
-          curl -Lb /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}&confirm=${CONFIRM}" -o boot.img
+          # Используем более агрессивный метод вытягивания токена подтверждения
+          FILE_ID="${{ github.event.inputs.boot_url }}"
+          CONFIRM=$(curl -sc /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}" | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
           
-          # Проверка: если файл меньше 5МБ, значит скачалась ошибка
-          if [ $(stat -c%s "boot.img") -lt 5000000 ]; then 
-            echo "Ошибка: Файл слишком мал. Проверь, что доступ к файлу открыт для всех!"
+          # Если CONFIRM пустой (файл мал), качаем напрямую, иначе с токеном
+          if [ -z "$CONFIRM" ]; then
+            curl -Lc /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}" -o boot.img
+          else
+            curl -Lb /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}&confirm=${CONFIRM}" -o boot.img
+          fi
+          
+          # Финальная проверка размера (должен быть больше 10МБ)
+          if [ $(stat -c%s "boot.img") -lt 10000000 ]; then 
+            echo "Ошибка: Скачанный файл подозрительно мал. Попробуй использовать прямую ссылку с Catbox.moe"
             exit 1
           fi
 
       - name: Download Tools
         run: |
-          # Скачиваем magiskboot
           curl -L "https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip" -o magiskboot.zip
           unzip -j magiskboot.zip x86_64/magiskboot -d . && chmod +x magiskboot
-          
-          # Скачиваем ядро KernelSU (версия 4.14 для Samsung A50)
           curl -L "https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img" -o ksu_kernel
 
       - name: Patching Image
         run: |
-          # Распаковка
           ./magiskboot unpack boot.img
           if [ ! -f kernel ]; then echo "Ошибка распаковки!"; exit 1; fi
-          
-          # Замена ядра
           mv ksu_kernel kernel
-          
-          # Сборка обратно
           ./magiskboot repack boot.img patched_boot.img
-          if [ ! -f patched_boot.img ]; then echo "Ошибка сборки!"; exit 1; fi
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
