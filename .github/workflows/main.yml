@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       boot_url:
-        description: "Прямая ссылка на boot.img"
+        description: "Прямая ссылка на твой boot.img"
         required: true
         default: "https://docs.google.com/uc?export=download&id=1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
+      ksu_version:
+        description: "Версия KernelSU"
+        required: true
+        default: "v0.9.5"
 
 jobs:
   patch:
@@ -16,27 +20,30 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Tools
-        run: sudo apt update && sudo apt install -y cpio wget
+        run: |
+          sudo apt update
+          sudo apt install -y cpio curl unzip
 
       - name: Download Boot
         run: |
-          wget --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36" -O boot.img "${{ github.event.inputs.boot_url }}"
-          if [ $(stat -c%s "boot.img") -lt 1000 ]; then echo "Ошибка: скачался слишком маленький файл (вероятно 403)"; exit 1; fi
+          curl -L -o boot.img "${{ github.event.inputs.boot_url }}"
+          if [ $(stat -c%s "boot.img") -lt 1000000 ]; then echo "Ошибка: Файл слишком мал. Проверь доступ к Google Drive!"; exit 1; fi
 
       - name: Download Tools
         run: |
-          wget -q https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip
+          curl -L "https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip" -o magiskboot.zip
           unzip -j magiskboot.zip x86_64/magiskboot -d . && chmod +x magiskboot
-          wget -q -O ksu_kernel https://github.com/tiann/KernelSU/releases/download/v0.9.5/kernel-arm64-414-release.img
+          curl -L "https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img" -o ksu_kernel
 
       - name: Patching Image
         run: |
           ./magiskboot unpack boot.img
+          if [ ! -f kernel ]; then echo "Ошибка распаковки: файл kernel не найден"; exit 1; fi
           mv ksu_kernel kernel
           ./magiskboot repack boot.img patched_boot.img
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: KSU_Patched_Boot
+          name: KSU_Patched_Boot_A50
           path: patched_boot.img
