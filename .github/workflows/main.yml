@@ -1,15 +1,49 @@
-- name: Setup Magiskboot & KSU Kernel
+name: Patch Boot with KernelSU
+
+on:
+  workflow_dispatch:
+    inputs:
+      boot_id:
+        description: "ID твоего файла на Google Drive"
+        required: true
+        default: "1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
+      ksu_version:
+        description: "Версия KernelSU"
+        required: true
+        default: "v0.9.5"
+
+jobs:
+  build:
+    name: Patching Boot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Install Tools
         run: |
-          # Используем стабильное зеркало для magiskboot (x86_64 для Ubuntu Runner)
-          # Если эта ссылка тоже упадет, у нас есть запасной вариант ниже
+          sudo apt update
+          sudo apt install -y cpio curl unzip python3-pip file
+          pip3 install gdown
+
+      - name: Download Boot Image
+        run: |
+          gdown ${{ github.event.inputs.boot_id }} -O boot.img
+          if [ ! -s boot.img ]; then echo "Ошибка: boot.img пустой!"; exit 1; fi
+
+      - name: Setup Magiskboot & KSU Kernel
+        run: |
+          # Скачиваем magiskboot из рабочего зеркала
           curl -f -L "https://github.com/heyandyc/magiskboot-binary/raw/main/magiskboot" -o magiskboot || \
           curl -f -L "https://github.com/punpundesu/magiskboot-bins/raw/main/x86_64/magiskboot" -o magiskboot
           
           chmod +x magiskboot
           
-          # Проверка, что файл реально скачался и это исполняемый файл
+          # Проверка на ELF (бинарный файл)
           if ! file magiskboot | grep -q "ELF"; then
-            echo "Ошибка: Скачанный файл magiskboot поврежден или не является бинарником!"
+            echo "Ошибка: magiskboot не является бинарником!"
             exit 1
           fi
           
@@ -19,3 +53,31 @@
             echo "Ошибка скачивания ядра KSU"
             exit 1
           fi
+
+      - name: Patching Process
+        run: |
+          # Распаковка
+          ./magiskboot unpack boot.img
+          if [ ! -f kernel ]; then echo "Ошибка распаковки!"; exit 1; fi
+          
+          # Замена ядра
+          mv -f ksu_kernel kernel
+          
+          # Сборка
+          ./magiskboot repack boot.img patched_boot.img
+          if [ ! -f patched_boot.img ]; then echo "Ошибка сборки!"; exit 1; fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Patched_Boot_A50
+          path: patched_boot.img
+
+      - name: Release Patched Boot
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: ksu-${{ github.event.inputs.ksu_version }}-${{ github.run_id }}
+          body: |
+            KernelSU Patched Boot для Samsung A50.
+          files: patched_boot.img
