@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       boot_url:
-        description: "Прямая ссылка на твой boot.img (Pixeldrain API)"
+        description: "Прямая ссылка на твой boot.img"
         required: true
         default: "https://pixeldrain.com/api/file/SqZYwFty"
       ksu_version:
-        description: "Версия KernelSU"
+        description: "Версия KernelSU (рекомендую v0.9.5 для 4.14)"
         required: true
         default: "v0.9.5"
 
@@ -22,29 +22,40 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt update
-          sudo apt install -y axel python3 python3-pip
-          pip3 install GitPython
+          sudo apt install -y cpio
 
       - name: Download Boot
         run: |
-          axel -n 8 "${{ github.event.inputs.boot_url }}" -o boot.img
+          # Используем User-Agent, чтобы обойти ошибку 403
+          curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36" \
+          "${{ github.event.inputs.boot_url }}" -o boot.img
+          if [ ! -f boot.img ]; then echo "Ошибка: файл не скачался"; exit 1; fі
 
-      - name: Setup KernelSU
+      - name: Download MagiskBoot & KSU
         run: |
-          # Используем официальный скрипт интеграции для Non-GKI
-          mkdir kernel_workspace
-          cd kernel_workspace
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s ${{ github.event.inputs.ksu_version }}
+          # Качаем инструменты для разборки boot.img
+          mkdir work && cd work
+          curl -Lo magiskboot.zip https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip
+          unzip magiskboot.zip x86_64/magiskboot && mv x86_64/magiskboot . && chmod +x magiskboot
+          
+          # Качаем само ядро KSU (LKM модуль для ядра 4.14)
+          curl -Lo ksu_kernel https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img
+          mv ksu_kernel .. && mv magiskboot .. && cd ..
 
-      - name: Patching (MagiskBoot Style)
+      - name: Patching Image
         run: |
-          # Тут должна быть магия патчинга через magiskboot или аналоги
-          # Но так как мы работаем в режиме "быстрого исправления", 
-          # мы используем упрощенный алгоритм встраивания модуля.
-          echo "Патчим образ с KSU ${{ github.event.inputs.ksu_version }}..."
+          # Разбираем твой boot.img
+          ./magiskboot unpack boot.img
+          
+          # Заменяем ядро на KernelSU
+          # Внимание: мы подменяем секцию ядра внутри образа
+          mv ksu_kernel kernel
+          
+          # Собираем всё обратно
+          ./magiskboot repack boot.img patched_boot.img
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: patched_boot
-          path: boot.img
+          name: KSU_Patched_Boot_A50
+          path: patched_boot.img
