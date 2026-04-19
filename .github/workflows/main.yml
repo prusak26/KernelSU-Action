@@ -7,10 +7,10 @@ on:
         description: "ID твоего файла на Google Drive"
         required: true
         default: "1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
-      ksu_kernel_url:
-        description: "Прямая ссылка на ksu_kernel (Image или .img)"
+      ksu_version:
+        description: "Версия KernelSU (например, v0.9.5)"
         required: true
-        default: "https://github.com/tiann/KernelSU/releases/download/v0.9.5/kernel-arm64-414-release.img"
+        default: "v0.9.5"
 
 jobs:
   build:
@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout this repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Tools
@@ -33,42 +33,41 @@ jobs:
           gdown ${{ github.event.inputs.boot_id }} -O boot.img
           if [ ! -s boot.img ]; then echo "Ошибка: boot.img пустой!"; exit 1; fi
 
-      - name: Setup Magiskboot & KSU Kernel
+      - name: Setup Magiskboot
         run: |
-          # Скачиваем magiskboot
-          curl -f -L "https://github.com/heyandyc/magiskboot-binary/raw/main/magiskboot" -o magiskboot || \
-          curl -f -L "https://github.com/punpundesu/magiskboot-bins/raw/main/x86_64/magiskboot" -o magiskboot
+          # Качаем magiskboot напрямую из проверенного места
+          curl -f -L "https://github.com/heyandyc/magiskboot-binary/raw/main/magiskboot" -o magiskboot
           chmod +x magiskboot
+
+      - name: Extract Kernel from KernelSU Release
+        run: |
+          # Качаем AnyKernel3 архив, потому что в релизах нет голых .img
+          KSU_ZIP="AnyKernel3-KernelSU-${{ github.event.inputs.ksu_version }}-kernelsu.zip"
+          KSU_URL="https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/$KSU_ZIP"
           
-          # Скачиваем ядро KernelSU по ссылке
-          if ! curl -f -L "${{ github.event.inputs.ksu_kernel_url }}" -o ksu_kernel; then
-            echo "❌ Ошибка: Ссылка на ядро KSU неверна (404). Проверь название файла в релизах KernelSU!"
-            exit 1
-          fi
+          echo "Скачиваем: $KSU_URL"
+          curl -f -L "$KSU_URL" -o ksu_release.zip
+          
+          # Распаковываем только само ядро (файл Image)
+          unzip -j ksu_release.zip Image -d .
+          mv Image ksu_kernel
 
       - name: Patching Process
         run: |
+          # Распаковка оригинального бута
           ./magiskboot unpack boot.img
-          if [ ! -f kernel ]; then echo "Ошибка распаковки!"; exit 1; fi
           
-          # Заменяем оригинальное ядро на скачанное KSU
+          # Подмена
           mv -f ksu_kernel kernel
           
+          # Сборка
           ./magiskboot repack boot.img patched_boot.img
           if [ ! -f patched_boot.img ]; then echo "Ошибка сборки!"; exit 1; fi
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Patched_Boot_A50
-          path: patched_boot.img
-
-      - name: Release
+      - name: Upload & Release
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: patch-${{ github.run_id }}
-          body: |
-            Патченный boot.img.
-            Использовано ядро из: ${{ github.event.inputs.ksu_kernel_url }}
+          tag_name: ksu-patch-${{ github.run_id }}
+          body: "Патч для Samsung A50 готов. Версия KSU: ${{ github.event.inputs.ksu_version }}"
           files: patched_boot.img
