@@ -1,73 +1,55 @@
-name: Patch Boot with KernelSU
-
+name: A50 KSU Patcher
 on:
   workflow_dispatch:
     inputs:
-      boot_id:
-        description: "ID твоего файла на Google Drive"
+      boot_url:
+        description: "ПРЯМАЯ ссылка на твой boot.img (например из тг или любого хостинга)"
         required: true
-        default: "1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
       ksu_version:
-        description: "Версия KernelSU (например, v0.9.5)"
-        required: true
+        description: "Версия KernelSU"
         default: "v0.9.5"
 
 jobs:
-  build:
-    name: Patching Boot
+  patch:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Tools
+      - name: Setup Tools
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          sudo apt update
-          sudo apt install -y cpio curl unzip python3-pip file
-          pip3 install gdown
+          sudo apt update && sudo apt install -y cpio file
+          # Качаем magiskboot ОФИЦИАЛЬНЫМ способом через GitHub CLI
+          gh release download v27.0 --repo magisk-modules/magiskboot-binaries --pattern "*x86_64*"
+          unzip -o magiskboot.zip x86_64/magiskboot -d .
+          mv x86_64/magiskboot . && chmod +x magiskboot
 
-      - name: Download Boot Image
+      - name: Download and Extract
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          gdown ${{ github.event.inputs.boot_id }} -O boot.img
-          if [ ! -s boot.img ]; then echo "Ошибка: boot.img пустой!"; exit 1; fi
-
-      - name: Setup Magiskboot
-        run: |
-          # Качаем magiskboot напрямую из проверенного места
-          curl -f -L "https://github.com/heyandyc/magiskboot-binary/raw/main/magiskboot" -o magiskboot
-          chmod +x magiskboot
-
-      - name: Extract Kernel from KernelSU Release
-        run: |
-          # Качаем AnyKernel3 архив, потому что в релизах нет голых .img
-          KSU_ZIP="AnyKernel3-KernelSU-${{ github.event.inputs.ksu_version }}-kernelsu.zip"
-          KSU_URL="https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/$KSU_ZIP"
+          # Качаем твой бут по прямой ссылке
+          curl -L "${{ github.event.inputs.boot_url }}" -o boot.img
           
-          echo "Скачиваем: $KSU_URL"
-          curl -f -L "$KSU_URL" -o ksu_release.zip
+          # Качаем AnyKernel3 архив KSU (он всегда есть в релизах)
+          gh release download ${{ github.event.inputs.ksu_version }} --repo tiann/KernelSU --pattern "AnyKernel3-KernelSU-*-kernelsu.zip" -O ksu.zip
           
-          # Распаковываем только само ядро (файл Image)
-          unzip -j ksu_release.zip Image -d .
-          mv Image ksu_kernel
+          # Вытаскиваем ядро Image напрямую из архива
+          unzip -p ksu.zip Image > ksu_kernel
+          if [ ! -s ksu_kernel ]; then echo "Ядро не найдено в архиве!"; exit 1; fi
 
-      - name: Patching Process
+      - name: Patching
         run: |
-          # Распаковка оригинального бута
           ./magiskboot unpack boot.img
-          
-          # Подмена
+          # Подменяем родное ядро на ядро с поддержкой KSU
           mv -f ksu_kernel kernel
-          
-          # Сборка
           ./magiskboot repack boot.img patched_boot.img
           if [ ! -f patched_boot.img ]; then echo "Ошибка сборки!"; exit 1; fi
 
-      - name: Upload & Release
-        uses: softprops/action-gh-release@v2
-        if: success()
+      - name: Upload
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ksu-patch-${{ github.run_id }}
-          body: "Патч для Samsung A50 готов. Версия KSU: ${{ github.event.inputs.ksu_version }}"
-          files: patched_boot.img
+          name: patched-boot-A50
+          path: patched_boot.img
