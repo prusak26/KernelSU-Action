@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       boot_url:
-        description: "ID файла Google Drive (только буквы и цифры)"
+        description: "Прямая ссылка на boot.img (например, Catbox)"
         required: true
-        default: "1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
+        default: "https://files.catbox.moe/5ehnij.img"
       ksu_version:
         description: "Версия KernelSU"
         required: true
@@ -22,39 +22,40 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt update
-          sudo apt install -y cpio curl unzip wget
+          sudo apt install -y cpio curl unzip
 
       - name: Download Boot
         run: |
-          # Используем более агрессивный метод вытягивания токена подтверждения
-          FILE_ID="${{ github.event.inputs.boot_url }}"
-          CONFIRM=$(curl -sc /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}" | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
+          # Просто скачиваем файл по прямой ссылке
+          curl -L "${{ github.event.inputs.boot_url }}" -o boot.img
           
-          # Если CONFIRM пустой (файл мал), качаем напрямую, иначе с токеном
-          if [ -z "$CONFIRM" ]; then
-            curl -Lc /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}" -o boot.img
-          else
-            curl -Lb /tmp/gcookie "https://docs.google.com/uc?export=download&id=${FILE_ID}&confirm=${CONFIRM}" -o boot.img
-          fi
-          
-          # Финальная проверка размера (должен быть больше 10МБ)
+          # Проверка: если файл меньше 10МБ, значит что-то пошло не так
           if [ $(stat -c%s "boot.img") -lt 10000000 ]; then 
-            echo "Ошибка: Скачанный файл подозрительно мал. Попробуй использовать прямую ссылку с Catbox.moe"
+            echo "Ошибка: Файл не скачался или поврежден!"
             exit 1
           fi
 
       - name: Download Tools
         run: |
+          # Скачиваем magiskboot для разборки образа
           curl -L "https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip" -o magiskboot.zip
           unzip -j magiskboot.zip x86_64/magiskboot -d . && chmod +x magiskboot
+          
+          # Скачиваем официальное ядро KernelSU 4.14
           curl -L "https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img" -o ksu_kernel
 
       - name: Patching Image
         run: |
+          # Распаковываем твой boot.img
           ./magiskboot unpack boot.img
-          if [ ! -f kernel ]; then echo "Ошибка распаковки!"; exit 1; fi
-          mv ksu_kernel kernel
+          if [ ! -f kernel ]; then echo "Ошибка: Не удалось распаковать boot.img!"; exit 1; fi
+          
+          # Подменяем ядро на KernelSU
+          mv -f ksu_kernel kernel
+          
+          # Собираем образ обратно
           ./magiskboot repack boot.img patched_boot.img
+          if [ ! -f patched_boot.img ]; then echo "Ошибка: Не удалось собрать новый образ!"; exit 1; fі
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
