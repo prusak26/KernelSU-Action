@@ -27,27 +27,28 @@ jobs:
 
       - name: Download Boot
         run: |
-          # Скачиваем файл (gdown сам определит ID)
           gdown ${{ github.event.inputs.boot_id }} -O boot.img
-          
-          if [ ! -s boot.img ]; then
-            echo "Ошибка: Не удалось скачать файл. Проверь доступ!"
-            exit 1
-          fi
-          echo "Файл успешно скачан, размер: $(stat -c%s "boot.img") байт"
+          if [ ! -s boot.img ]; then echo "Ошибка: Файл не скачан!"; exit 1; fi
 
-      - name: Download Tools
+      - name: Patching Process
         run: |
+          # Скачиваем и сразу подготавливаем magiskboot
           curl -L "https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip" -o magiskboot.zip
-          unzip -j magiskboot.zip x86_64/magiskboot -d . && chmod +x magiskboot
+          unzip -o magiskboot.zip x86_64/magiskboot && mv x86_64/magiskboot . && chmod +x magiskboot
+          
+          # Скачиваем ядро KSU
           curl -L "https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img" -o ksu_kernel
-
-      - name: Patching Image
-        run: |
+          
+          # Распаковка
           ./magiskboot unpack boot.img
-          if [ ! -f kernel ]; then echo "Ошибка распаковки!"; exit 1; fi
+          if [ ! -f kernel ]; then echo "Ошибка: Не удалось распаковать boot.img!"; exit 1; fi
+          
+          # Замена
           mv -f ksu_kernel kernel
+          
+          # Сборка
           ./magiskboot repack boot.img patched_boot.img
+          if [ ! -f patched_boot.img ]; then echo "Ошибка: patched_boot.img не создан!"; exit 1; fi
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
