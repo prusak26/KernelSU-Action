@@ -7,10 +7,10 @@ on:
         description: "ID твоего файла на Google Drive"
         required: true
         default: "1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
-      ksu_version:
-        description: "Версия KernelSU"
+      ksu_kernel_url:
+        description: "Прямая ссылка на ksu_kernel (Image или .img)"
         required: true
-        default: "v0.9.5"
+        default: "https://github.com/tiann/KernelSU/releases/download/v0.9.5/kernel-arm64-414-release.img"
 
 jobs:
   build:
@@ -35,35 +35,25 @@ jobs:
 
       - name: Setup Magiskboot & KSU Kernel
         run: |
-          # Скачиваем magiskboot из рабочего зеркала
+          # Скачиваем magiskboot
           curl -f -L "https://github.com/heyandyc/magiskboot-binary/raw/main/magiskboot" -o magiskboot || \
           curl -f -L "https://github.com/punpundesu/magiskboot-bins/raw/main/x86_64/magiskboot" -o magiskboot
-          
           chmod +x magiskboot
           
-          # Проверка на ELF (бинарный файл)
-          if ! file magiskboot | grep -q "ELF"; then
-            echo "Ошибка: magiskboot не является бинарником!"
-            exit 1
-          fi
-          
-          # Загрузка ядра KernelSU
-          KSU_URL="https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img"
-          if ! curl -f -L "$KSU_URL" -o ksu_kernel; then
-            echo "Ошибка скачивания ядра KSU"
+          # Скачиваем ядро KernelSU по ссылке
+          if ! curl -f -L "${{ github.event.inputs.ksu_kernel_url }}" -o ksu_kernel; then
+            echo "❌ Ошибка: Ссылка на ядро KSU неверна (404). Проверь название файла в релизах KernelSU!"
             exit 1
           fi
 
       - name: Patching Process
         run: |
-          # Распаковка
           ./magiskboot unpack boot.img
           if [ ! -f kernel ]; then echo "Ошибка распаковки!"; exit 1; fi
           
-          # Замена ядра
+          # Заменяем оригинальное ядро на скачанное KSU
           mv -f ksu_kernel kernel
           
-          # Сборка
           ./magiskboot repack boot.img patched_boot.img
           if [ ! -f patched_boot.img ]; then echo "Ошибка сборки!"; exit 1; fi
 
@@ -73,11 +63,12 @@ jobs:
           name: Patched_Boot_A50
           path: patched_boot.img
 
-      - name: Release Patched Boot
+      - name: Release
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: ksu-${{ github.event.inputs.ksu_version }}-${{ github.run_id }}
+          tag_name: patch-${{ github.run_id }}
           body: |
-            KernelSU Patched Boot для Samsung A50.
+            Патченный boot.img.
+            Использовано ядро из: ${{ github.event.inputs.ksu_kernel_url }}
           files: patched_boot.img
