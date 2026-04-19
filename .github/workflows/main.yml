@@ -6,7 +6,7 @@ on:
       boot_url:
         description: "Прямая ссылка на boot.img"
         required: true
-        default: "https://pixeldrain.com/api/file/SqZYwFty"
+        default: "https://docs.google.com/uc?export=download&id=1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
 
 jobs:
   patch:
