@@ -23,17 +23,15 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y cpio curl unzip python3-pip
-          # Устанавливаем gdown для надежного скачивания с Google Drive
           pip3 install gdown
 
       - name: Download Boot
         run: |
-          # Скачиваем файл по ID
-          gdown --id ${{ github.event.inputs.boot_id }} -O boot.img
+          # Скачиваем файл (gdown сам определит ID)
+          gdown ${{ github.event.inputs.boot_id }} -O boot.img
           
-          # Проверка: если файл не скачался, gdown выдаст ошибку
           if [ ! -s boot.img ]; then
-            echo "Ошибка: Не удалось скачать файл. Проверь ID и доступ!"
+            echo "Ошибка: Не удалось скачать файл. Проверь доступ!"
             exit 1
           fi
           echo "Файл успешно скачан, размер: $(stat -c%s "boot.img") байт"
