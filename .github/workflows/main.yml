@@ -4,13 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       boot_url:
-        description: "Прямая ссылка на твой boot.img"
+        description: "Прямая ссылка на boot.img"
         required: true
         default: "https://pixeldrain.com/api/file/SqZYwFty"
-      ksu_version:
-        description: "Версия KernelSU (рекомендую v0.9.5 для 4.14)"
-        required: true
-        default: "v0.9.5"
 
 jobs:
   patch:
@@ -20,42 +16,27 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Tools
-        run: |
-          sudo apt update
-          sudo apt install -y cpio
+        run: sudo apt update && sudo apt install -y cpio wget
 
       - name: Download Boot
         run: |
-          # Используем User-Agent, чтобы обойти ошибку 403
-          curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36" \
-          "${{ github.event.inputs.boot_url }}" -o boot.img
-          if [ ! -f boot.img ]; then echo "Ошибка: файл не скачался"; exit 1; fі
+          wget --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36" -O boot.img "${{ github.event.inputs.boot_url }}"
+          if [ $(stat -c%s "boot.img") -lt 1000 ]; then echo "Ошибка: скачался слишком маленький файл (вероятно 403)"; exit 1; fi
 
-      - name: Download MagiskBoot & KSU
+      - name: Download Tools
         run: |
-          # Качаем инструменты для разборки boot.img
-          mkdir work && cd work
-          curl -Lo magiskboot.zip https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip
-          unzip magiskboot.zip x86_64/magiskboot && mv x86_64/magiskboot . && chmod +x magiskboot
-          
-          # Качаем само ядро KSU (LKM модуль для ядра 4.14)
-          curl -Lo ksu_kernel https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img
-          mv ksu_kernel .. && mv magiskboot .. && cd ..
+          wget -q https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip
+          unzip -j magiskboot.zip x86_64/magiskboot -d . && chmod +x magiskboot
+          wget -q -O ksu_kernel https://github.com/tiann/KernelSU/releases/download/v0.9.5/kernel-arm64-414-release.img
 
       - name: Patching Image
         run: |
-          # Разбираем твой boot.img
           ./magiskboot unpack boot.img
-          
-          # Заменяем ядро на KernelSU
-          # Внимание: мы подменяем секцию ядра внутри образа
           mv ksu_kernel kernel
-          
-          # Собираем всё обратно
           ./magiskboot repack boot.img patched_boot.img
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: KSU_Patched_Boot_A50
+          name: KSU_Patched_Boot
           path: patched_boot.img
