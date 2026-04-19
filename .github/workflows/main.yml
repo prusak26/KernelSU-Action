@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       boot_url:
-        description: "Прямая ссылка на boot.img (например, Catbox)"
+        description: "Ссылка на boot.img"
         required: true
         default: "https://files.catbox.moe/5ehnij.img"
       ksu_version:
@@ -21,41 +21,39 @@ jobs:
 
       - name: Install Tools
         run: |
-          sudo apt update
-          sudo apt install -y cpio curl unzip
+          sudo apt-get update
+          sudo apt-get install -y cpio curl unzip wget
 
       - name: Download Boot
         run: |
-          # Просто скачиваем файл по прямой ссылке
-          curl -L "${{ github.event.inputs.boot_url }}" -o boot.img
+          # Пробуем wget с подменой браузера и повторами
+          wget -U "Mozilla/5.0" --tries=5 --wait=2 -O boot.img "${{ github.event.inputs.boot_url }}"
           
-          # Проверка: если файл меньше 10МБ, значит что-то пошло не так
-          if [ $(stat -c%s "boot.img") -lt 10000000 ]; then 
-            echo "Ошибка: Файл не скачался или поврежден!"
+          # Если wget не справился, пробуем curl
+          if [ ! -s boot.img ]; then
+            curl -L -A "Mozilla/5.0" -o boot.img "${{ github.event.inputs.boot_url }}"
+          fi
+
+          # Проверка размера (минимум 5МБ)
+          SIZE=$(stat -c%s "boot.img")
+          echo "Размер скачанного файла: $SIZE байт"
+          if [ $SIZE -lt 5000000 ]; then 
+            echo "Ошибка: Файл пустой или слишком мал!"
             exit 1
           fi
 
       - name: Download Tools
         run: |
-          # Скачиваем magiskboot для разборки образа
           curl -L "https://github.com/magisk-modules/magiskboot-binaries/releases/download/v27.0/magiskboot.zip" -o magiskboot.zip
           unzip -j magiskboot.zip x86_64/magiskboot -d . && chmod +x magiskboot
-          
-          # Скачиваем официальное ядро KernelSU 4.14
           curl -L "https://github.com/tiann/KernelSU/releases/download/${{ github.event.inputs.ksu_version }}/kernel-arm64-414-release.img" -o ksu_kernel
 
       - name: Patching Image
         run: |
-          # Распаковываем твой boot.img
           ./magiskboot unpack boot.img
-          if [ ! -f kernel ]; then echo "Ошибка: Не удалось распаковать boot.img!"; exit 1; fi
-          
-          # Подменяем ядро на KernelSU
+          if [ ! -f kernel ]; then echo "Не удалось распаковать!"; exit 1; fi
           mv -f ksu_kernel kernel
-          
-          # Собираем образ обратно
           ./magiskboot repack boot.img patched_boot.img
-          if [ ! -f patched_boot.img ]; then echo "Ошибка: Не удалось собрать новый образ!"; exit 1; fі
 
       - name: Upload Result
         uses: actions/upload-artifact@v4
