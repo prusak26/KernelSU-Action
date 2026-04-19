@@ -3,10 +3,10 @@ name: Patch Boot with KernelSU
 on:
   workflow_dispatch:
     inputs:
-      boot_url:
-        description: "Ссылка на boot.img"
+      boot_id:
+        description: "ID твоего файла на Google Drive"
         required: true
-        default: "https://files.catbox.moe/5ehnij.img"
+        default: "1lMs6TFkuuN-FxXgwpkV6cAPLd71BYVMf"
       ksu_version:
         description: "Версия KernelSU"
         required: true
@@ -21,26 +21,22 @@ jobs:
 
       - name: Install Tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cpio curl unzip wget
+          sudo apt update
+          sudo apt install -y cpio curl unzip python3-pip
+          # Устанавливаем gdown для надежного скачивания с Google Drive
+          pip3 install gdown
 
       - name: Download Boot
         run: |
-          # Пробуем wget с подменой браузера и повторами
-          wget -U "Mozilla/5.0" --tries=5 --wait=2 -O boot.img "${{ github.event.inputs.boot_url }}"
+          # Скачиваем файл по ID
+          gdown --id ${{ github.event.inputs.boot_id }} -O boot.img
           
-          # Если wget не справился, пробуем curl
+          # Проверка: если файл не скачался, gdown выдаст ошибку
           if [ ! -s boot.img ]; then
-            curl -L -A "Mozilla/5.0" -o boot.img "${{ github.event.inputs.boot_url }}"
-          fi
-
-          # Проверка размера (минимум 5МБ)
-          SIZE=$(stat -c%s "boot.img")
-          echo "Размер скачанного файла: $SIZE байт"
-          if [ $SIZE -lt 5000000 ]; then 
-            echo "Ошибка: Файл пустой или слишком мал!"
+            echo "Ошибка: Не удалось скачать файл. Проверь ID и доступ!"
             exit 1
           fi
+          echo "Файл успешно скачан, размер: $(stat -c%s "boot.img") байт"
 
       - name: Download Tools
         run: |
@@ -51,7 +47,7 @@ jobs:
       - name: Patching Image
         run: |
           ./magiskboot unpack boot.img
-          if [ ! -f kernel ]; then echo "Не удалось распаковать!"; exit 1; fi
+          if [ ! -f kernel ]; then echo "Ошибка распаковки!"; exit 1; fi
           mv -f ksu_kernel kernel
           ./magiskboot repack boot.img patched_boot.img
 
